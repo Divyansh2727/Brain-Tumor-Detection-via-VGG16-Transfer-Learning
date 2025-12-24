@@ -1,0 +1,229 @@
+!pip install opencv-python
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+from glob import glob
+from PIL import Image
+from numpy import asarray
+
+dirct ='/media/rishav/Local Disk/Personal/MachineLearningProjects/Brain-Tumor-Detection/'
+
+import os
+dataset_path = dirct+'/Brain Tumor Data'
+
+classes = {'no_tumor':0, 'pituitary_tumor':1}
+
+no_tumor_frompath= dirct+'/Brain Tumor Data/Training/no_tumor'
+no_tumor_topath = dirct+'/Brain Tumor Data/Agumented_Data/Training/no_tumor/'
+no_tumor_images=glob(no_tumor_frompath+'/*')
+c=0
+for path in no_tumor_images:
+  img=Image.open(path)
+  img=img.resize((224,224))
+  img.save(no_tumor_topath+str(c)+'.jpg')
+  c+=1
+  mirimg=img.transpose(Image.FLIP_LEFT_RIGHT)
+  mirimg.save(no_tumor_topath+str(c)+'.jpg')
+  c+=1
+  rotimg=img.rotate(90,Image.NEAREST, expand = 1)
+  rotimg.save(no_tumor_topath+str(c)+'.jpg')
+  c+=1
+  mirrotimg=rotimg.transpose(Image.FLIP_LEFT_RIGHT)
+  mirrotimg.save(no_tumor_topath+str(c)+'.jpg')
+  c+=1
+
+frompath = dirct+'Brain Tumor Data/Training/pituitary_tumor'
+topath = dirct+'Brain Tumor Data/Agumented_Data/Training/pituitary_tumor/'
+images=glob(frompath+'/*')
+c=0
+for path in images:
+  img=Image.open(path)
+  img=img.resize((224,224))
+  img.save(topath+str(c)+'.jpg')
+  c+=1
+  mirimg=img.transpose(Image.FLIP_LEFT_RIGHT)
+  mirimg.save(topath+str(c)+'.jpg')
+  c+=1
+  rotimg=img.rotate(90,Image.NEAREST, expand = 1)
+  rotimg.save(topath+str(c)+'.jpg')
+  c+=1
+  mirrotimg=rotimg.transpose(Image.FLIP_LEFT_RIGHT)
+  mirrotimg.save(topath+str(c)+'.jpg')
+  c+=1
+
+img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+import cv2
+X=[]
+Y=[]
+for cls in classes:
+  pth = dirct+'/Brain Tumor Data/Agumented_Data/Training/'+cls
+  for j in os.listdir(pth):
+    img = cv2.imread(pth+'/'+j)   
+    # img = cv2.resize(img,dsize=(224,224))
+    X.append(img)
+    Y.append(classes[cls])
+
+plt.imshow(X[0],cmap='gray')
+
+x_train,x_test,y_train,y_test=train_test_split(X,Y,random_state=10,test_size=0.20)
+print ("Shape of an image in x_train: ", x_train[0].shape)
+print ("Shape of an image in x_test: ", x_test[0].shape)
+
+le.fit(Y)
+y_train = le.transform(y_train)
+y_test = le.transform(y_test)
+
+from sklearn import preprocessing
+import tensorflow as tf
+le = preprocessing.LabelEncoder()
+y_train = le.fit_transform(y_train)
+y_test = le.fit_transform(y_test)
+y_train = tf.keras.utils.to_categorical(y_train, num_classes=2)
+y_test = tf.keras.utils.to_categorical(y_test, num_classes=2)
+y_train = np.array(y_train)
+x_train = np.array(x_train)
+y_test = np.array(y_test)
+x_test = np.array(x_test) 
+print("x_train Shape: ", x_train.shape) 
+print("x_test Shape: ", x_test.shape)
+print("y_train Shape: ", y_train.shape) 
+print("y_test Shape: ", y_test.shape)
+
+from tensorflow.keras.applications.vgg16 import preprocess_input
+x_train = preprocess_input(np.array(x_train))
+x_test  = preprocess_input(np.array(x_test))
+
+from keras.applications import vgg16
+
+img_rows,img_cols=224,224
+
+vgg=vgg16.VGG16(weights='imagenet', include_top=False, input_shape=(img_rows,img_cols,3))
+
+for layer in vgg.layers:
+  layer.trainable=False
+
+
+from keras.layers.pooling.global_average_pooling2d import GlobalAveragePooling2D
+def lw(bottom_model,num_classes):
+  top_model=bottom_model.output
+  top_model=GlobalAveragePooling2D()(top_model)
+  top_model=Dense(1024,activation='relu')(top_model)
+  top_model=Dense(1024,activation='relu')(top_model)
+  top_model=Dense(512,activation='relu')(top_model)
+  top_model=Dense(num_classes,activation='softmax')(top_model)
+  return top_model
+
+from keras.models import Sequential
+from keras.layers import Dense,Dropout,Activation,Flatten,GlobalAveragePooling2D
+from keras.layers import Conv2D,MaxPooling2D,ZeroPadding2D
+from keras.models import Model
+
+import tempfile
+
+def make_keras_picklable():
+    def __getstate__(self):
+        model_str = ""
+        with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=True) as fd:
+            save_model(self, fd.name, overwrite=True)
+            model_str = fd.read()
+        d = {'model_str': model_str}
+        return d
+
+    def __setstate__(self, state):
+        with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=True) as fd:
+            fd.write(state['model_str'])
+            fd.flush()
+            model = load_model(fd.name)
+        self.__dict__ = model.__dict__
+
+
+    cls = Model
+    cls.__getstate__ = __getstate__
+    cls.__setstate__ = __setstate__
+
+make_keras_picklable()
+
+num_classes=2
+FC_Head=lw(vgg,num_classes)
+model=Model(inputs=vgg.input,outputs=FC_Head)
+print(model.summary())
+
+from tensorflow.keras.models import Model
+model.compile(optimizer='adam',loss='categorical_crossentropy',metrics=['accuracy'])
+
+history=model.fit(x_train,y_train,epochs=5,validation_data=(x_test,y_test),verbose=1,initial_epoch=0)
+
+import pickle
+filename= 'brain_tumor_model.pkl'
+
+pickle.dump(model,open(filename,'wb'))
+
+model.save("brain_tumor_model.keras")
+loaded_model = tf.keras.models.load_model("brain_tumor_model.keras")
+
+load_model = pickle.load(open(filename,'rb'))
+#load_model.predict(x_test)
+
+# MLP for Pima Indians Dataset Serialize to JSON and HDF5
+from tensorflow.keras.models import model_from_json
+model_json = model.to_json()
+with open("model.json", "w") as json_file:
+    json_file.write(model_json)
+# serialize weights to HDF5
+model.save_weights("model.h5")
+
+json_file = open('model.json', 'r')
+loaded_model_json = json_file.read()
+json_file.close()
+loaded_model = model_from_json(loaded_model_json)
+# load weights into new model
+loaded_model.load_weights("model.h5")
+
+loaded_model.predict(x_test)
+
+dec= {0: 'No Tumor', 1:'Positive Tumor'}
+
+plt.figure(figsize=(18,12))
+p=os.listdir(path+'Brain Tumor Data/Training/pituitary_tumor')
+c=1
+predict_img=[]
+for i in os.listdir(path+'Brain Tumor Data/Training/pituitary_tumor/')[:16]:
+  plt.subplot(4,4,c)
+
+  img=cv2.imread(path+'Brain Tumor Data/Training/pituitary_tumor/'+i)
+  img1 = cv2.resize(img,(224,224))
+  predict_img.append(img1)
+  p= load_model.predict(np.array(predict_img))
+  result = np.argmax(p, axis =1)
+  plt.title(dec[result[c-1]])
+  plt.imshow(img,cmap='gray')
+  plt.axis('off')
+  c+=1
+
+img1 = preprocess_input(np.expand_dims(img1, axis=0))
+p = loaded_model.predict(img1)
+result = np.argmax(p)
+plt.title(dec[result])
+
+plt.figure(figsize=(18,12))
+p=os.listdir('/home/rishav/Brain Tumor Detection/Brain Tumor Data/Training/no_tumor')
+c=1
+predict_img=[]
+for i in os.listdir('/home/rishav/Brain Tumor Detection/Brain Tumor Data/Training/no_tumor/')[:16]:
+  plt.subplot(4,4,c)
+
+  img=cv2.imread('/home/rishav/Brain Tumor Detection/Brain Tumor Data/Training/no_tumor/'+i)
+  img1 = cv2.resize(img,(224,224))
+  predict_img.append(img1)
+  p= model.predict(np.array(predict_img))
+  result = np.argmax(p, axis =1)
+  plt.title(dec[result[c-1]])
+  plt.imshow(img,cmap='gray')
+  plt.axis('off')
+  c+=1
+
